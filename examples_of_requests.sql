@@ -666,3 +666,273 @@ select now() at time zone 'America/Los_Angeles'
 	from
 	    shipping.customer c
 	window wind as (order by c.annual_revenue desc)
+
+--Представим, что мы хотим оценить и сравнить самых «богатых» и самых «бедных» клиентов по выручке. Напишите запрос, который выведет трех лидеров и трех аутсайдеров по выручке, их количество доставок и средний вес доставки. Столбцы в выдаче: 
+--cust_name — имя клиента
+--annual_revenue — годовая выручка ship_qty — количество доставок на клиента avg_weight — средний вес доставки 
+--Сортировка по annual_revenue по убыванию. 
+	with a as (select
+	    c.cust_id,
+	    c.cust_name,
+	    c.annual_revenue,
+	    row_number()over(order by c.annual_revenue) asceding,
+	    row_number()over(order by c.annual_revenue desc) desceding
+	from
+	    shipping.customer c
+	order by annual_revenue),
+	
+	maxx as (
+	    select
+	    a.cust_id,
+	    a.cust_name,
+	    a.annual_revenue,
+	    count(s.cust_id),
+	    avg(s.weight)
+	from
+	    a left join shipping.shipment s on a.cust_id = s.cust_id
+	group by 1,2,3,a.asceding
+	order by a.asceding 
+	limit 3),
+	
+	minn as (
+	select
+	    a.cust_id,
+	    a.cust_name,
+	    a.annual_revenue,
+	    count(s.cust_id),
+	    avg(s.weight)
+	from
+	    a left join shipping.shipment s on a.cust_id = s.cust_id
+	group by 1,2,3,a.desceding
+	order by a.desceding  
+	limit 3)
+	
+	select
+	    *
+	from
+	    maxx
+	union all
+	select
+	    *
+	from
+	    minn
+
+
+--Давайте посмотрим в динамике на соотношение событий каждого типа — обычное и накопленное. Напишите запрос, который выведет количество открытий товаров, добавлений в корзину, оформлений заказов в разбивке по месяцам, а также кумулятивно эти метрики. Столбцы в выдаче: 
+--dt — дата первого дня месяца события 
+--views, carts, orders — 3 столбца 
+--количество событий view, addtocart, transaction соответственно в этот месяц 
+--столбцы views_cumulative, carts_cumulative, orders_cumulative, в которых будут те же значения, но с накоплением 
+--Сортировка по месяцу по убыванию. Столбец с датой необходимо привести к типу date. 
+	select
+	    distinct date_trunc('day',el.event_datetime)::date,
+	    count(case when el.event_name = 'view' then  el.event_name end) over (wind) as view,
+	    count(case when el.event_name = 'view' then  el.event_name end) over (wind_c) as view_c,
+	    count(case when el.event_name = 'addtocart' then  el.event_name end) over (wind) as atc,
+	    count(case when el.event_name = 'addtocart' then  el.event_name end) over (wind_c) as atc_c,
+	    count(case when el.event_name = 'transaction' then  el.event_name end) over (wind) as tst,
+	    count(case when el.event_name = 'transaction' then  el.event_name end) over (wind_c) as tst_c
+	from 
+	    webevents.event_log el
+	window wind as ( partition by date_trunc('day',el.event_datetime) ),
+	wind_c as ( order by date_trunc('day',el.event_datetime) )
+	order by 1 desc
+
+
+
+--Шаблон с _ (нижним подчеркиванием) можно использовать также для фильтрации строк нужной длины. Выведите все уникальные названия штатов из справочника shipping.city длиной 6 символов, 
+--отсортируйте в алфавитном порядке. Столбцы в выдаче: state — название штата (text). 
+	select
+	    c.state
+	from
+	    shipping.city c
+	where
+	    c.state like '______'
+	order by 1
+
+
+
+Выведите 5 самых длинных и 3 самых коротких названия города (уникальных). Если длина совпадает, то необходимо взять первое по алфавиту название. Отсортируйте по алфавиту. Столбцы в выдаче: city_name — название города (text). 
+	with a as (
+	    with b as (
+	        select
+	            c.state,
+	            length(c.state),
+	            row_number() over(partition by length(c.state) ) rn
+	        from
+	            shipping.city c
+	        group by 1
+	        order by 2 desc ,3
+	        )
+	    select
+	        *
+	    from
+	        b
+	    where
+	        b.rn = 1
+	    limit 5
+	    ) 
+	    
+	, c as (
+	    with d as (
+	        select
+	            c.state,
+	            length(c.state),
+	            row_number() over(partition by length(c.state) ) rn
+	        from
+	            shipping.city c
+	        group by 1
+	        order by 2  ,3
+	        )
+	    select
+	        *
+	    from
+	        d
+	    where
+	        d.rn = 1
+	    limit 3
+	    )
+	    
+	select
+	    a.state
+	from
+	    a
+	union all
+	select
+	    c.state
+	from
+	    c
+
+--Напишите запрос, который выведет число городов(city_id), начинающихся на A и заканчивающихся на y; число городов, содержащих 'new' (в любых регистрах) в названии; 
+--и число городов, длина названия которых равна 7. Столбцы в выдаче: qty_ay,qty_new,qty_7 (все поля int). 
+
+	with a as (select
+	    count(c.city_id) qty_ay
+	from
+	    shipping.city c
+	where
+	    c.city_name ilike 'a%y'),
+	b as (select
+	    count(c.city_id) qty_new
+	from
+	    shipping.city c
+	where
+	    c.city_name ilike '%new%'),
+	c as(select
+	    count(c.city_id) qty_7
+	from
+	    shipping.city c
+	where
+	    length(c.city_name) = 7)
+	    
+	select 
+	    a.qty_ay,
+	    b.qty_new,
+	    c.qty_7
+	from
+	    a,b,c
+
+
+--Напишите запрос, который выведет названия городов, содержащих 'new' в названии, но не начинающихся с 'New'. Столбцы в выдаче: city_name text. Используйте оператор '~*'. 
+select
+	c.city_name
+from
+	shipping.city c
+where
+    c.city_name !~* '^new' 
+    and 
+    c.city_name ~* '.*new.*' 
+
+
+
+--Напишите запрос, который выведет количество клиентов из shipping.customer, 
+--адрес которых начинается строго с четырех цифр. Столбцы в выдаче: qty int. 
+	select
+	    count(*)
+	from
+	    shipping.customer c
+	where
+	    c.address ~* '^\d\d\d\d\s.*'
+--Напишите запрос, который выведет адреса клиентов из shipping.customer, которые проживают на улицах (street или st в конце адреса), 
+--и номер дома, состоящий из трех цифр. Отсортируйте по алфавиту. Столбцы в выдаче: address. 
+	select
+    	*
+	from
+    	shipping.customer c
+	where
+    	c.address ~ '^\d+\s.*?\d{1}.*S(t|treet)'
+
+--Напишите запрос, который выведет все полеты, совершенные летом, (июнь, июль, август), и в которых упоминается 2 различных космических корабля. 
+--(Подсказка: они записываются через слеш, если их более одного.) Столбцы в выдаче: flight_description. 
+	select 
+	* 
+	from
+	rus_cos.flights f 
+	where
+	flight_description ~ '^.*-(06|07|08)-.*/.*$'
+
+--Напишите запрос, который выведет все полеты, первый корабль которых — российский, а второй — иностранный. 
+--(Считаем российскими те, где только русские буквы в названии, а иностранными — все те, где только латинские буквы в названии). Столбцы в выдаче: flight_description. 
+	select 
+    	* 
+	from
+    	rus_cos.flights f 
+	where
+    	flight_description ~* '^.*[А-Яа-я]/[A-Za-z]'
+
+--Напишите запрос, который выведет 2 столбца из адреса водителя: сам текст адреса (всю текстовую часть) и отдельно номер дома. Столбцы в выдаче: address_street text, building_no text. 
+	select
+	    substring(d.address, '.*\d{1,}') address_street,
+	    substring(d.address, '\s\D*') building_no
+	from shipping.driver d
+
+--Напишите запрос, который разделит фамилию, имя и отчество космонавтов из таблицы rus_cos.cosmonauts_names в разные столбцы.
+-- Также посчитайте пол по логике: если фамилия заканчивается на "ова" или "ая" — то женский, остальные — мужской. Отсортируйте по фамилии, а затем по имени. Фамилию, имя и отчество переведите в верхний регистр. Столбцы в выдаче: name text, last_name text, father_name — text, gender — text(male/female). 
+	select
+	   
+	    split_part(cn.full_name,' ',1) last_name,
+	    upper(split_part(cn.full_name,' ',2)) first_name,
+	    upper(split_part(cn.full_name,' ',3)) father_name,
+	    case    
+	        when substring( split_part(cn.full_name,' ',1),'\D{3}$') = 'ОВА' then 'Ж'
+	        when substring( split_part(cn.full_name,' ',1),'\D{2}$') = 'АЯ' then 'Ж'
+	        else 'М'
+	    end sex
+	
+	from
+	    rus_cos.cosmonauts_names cn
+	order by 1,2
+
+--Напишите запрос, который выделит из таблицы shipping.customer тех клиентов, в названии которых есть значок амперсанта(&). 
+--Выделите слово до и слово после амперсанта, и используя regexp_split_to_array создайте массив объектов, которые есть в названии. 
+--Отсортируйте по первому столбцу. Столбцы в выдаче: cust_name text, items text[]. Пример строки: cust_name = 'AAA Rentals Sales & Service';items= '{Sales , Service}'. 
+	select
+	    c.cust_name,
+	    regexp_split_to_array( substring(c.cust_name,'\w*\s[&]\s\w*'),'[&]') items
+	from
+	    shipping.customer c
+	where
+	    c.cust_name ~ '&'
+	order by 1
+
+--Напишите запрос, который выведет имена космонавтов и года их полетов в текстовом массиве, отсортированном по убыванию. 
+--Отфильтруйте тех, у кого было более трех полетов. Отсортируйте по убыванию числа полетов, при равенстве — по ФИО. 
+--Столбцы в выдаче: full_name text, years text[]. Пример строки: full_name= 'СОЛОВЬЁВ Анатолий Яковлевич'; years= '{1997,1995,1992,1990,1988}'. 
+
+	select
+	    c.full_name,
+	    array_agg(substring(f.flight_description,'^\w+s?')) years
+	from
+	     rus_cos.cosmonauts_names c
+	join rus_cos.flights f on c.cosmonaut_id = f.cosmonaut_id 
+	group by 1
+
+--Предположим, мы хотим выложить информацию о наших водителях в публичный доступ, но не хотим показывать их телефоны полностью. 
+--Напишите запрос, который заменяет в номерах телефона все цифры, кроме первых двух и последних двух, на 'x'. 
+--Например, для (901) 323-0258 результатом должно стать (901) 32x-xx58. Отсортируйте по имени и фамилии. Столбцы в выдаче: first_name text, last_name text, phone_modified text. 
+	select
+	d.first_name,
+	d.last_name,
+	regexp_replace(d.phone,'\d-\d{2}','x-xx','g')  phone_modified
+	from
+	    shipping.driver d
